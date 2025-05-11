@@ -1,0 +1,399 @@
+{
+  "name": "Pipeline Health Monitor",
+  "nodes": [
+    {
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {
+        "rule": "interval",
+        "interval": [
+          {
+            "field": "days",
+            "value": 1
+          }
+        ],
+        "startAt": "2023-01-01T06:00:00.000Z"
+      }
+    },
+    {
+      "name": "Get All Opportunities",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "pipeline_opportunities"
+      }
+    },
+    {
+      "name": "Analyze Pipeline Health",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const opportunities = items[0].json;
+          const today = new Date();
+          
+          let analysis = {
+            total_opportunities: opportunities.length,
+            total_value: 0,
+            stuck_deals: [],
+            closing_soon: [],
+            at_risk: [],
+            metrics: {
+              avg_deal_size: 0,
+              win_probability_weighted: 0,
+              pipeline_velocity: 0
+            },
+            actions_needed: []
+          };
+          
+          opportunities.forEach(opp => {
+            // Total value
+            analysis.total_value += opp.estimated_value || 0;
+            
+            // Check stuck deals (no activity in 7 days)
+            const lastActivity = new Date(opp.updated_at);
+            const daysSinceUpdate = (today - lastActivity) / (1000 * 60 * 60 * 24);
+            
+            if (daysSinceUpdate > 7) {
+              analysis.stuck_deals.push({
+                uuid: opp.uuid,
+                company: opp.company_id,
+                days_stuck: Math.round(daysSinceUpdate),
+                value: opp.estimated_value,
+                stage: opp.stage_id
+              });
+            }
+            
+            // Check closing soon (expected close date < 7 days)
+            if (opp.expected_close_date) {
+              const closeDate = new Date(opp.expected_close_date);
+              const daysToClose = (closeDate - today) / (1000 * 60 * 60 * 24);
+              
+              if (daysToClose <= 7 && daysToClose >= 0) {
+                analysis.closing_soon.push({
+                  uuid: opp.uuid,
+                  company: opp.company_id,
+                  days_to_close: Math.round(daysToClose),
+                  value: opp.estimated_value,
+                  probability: opp.probability
+                });
+              }
+            }
+            
+            // Check at-risk deals (low probability and closing soon)
+            if (opp.probability < 50 && opp.expected_close_date) {
+              const closeDate = new Date(opp.expected_close_date);
+              const daysToClose = (closeDate - today) / (1000 * 60 * 60 * 24);
+              
+              if (daysToClose <= 14) {
+                analysis.at_risk.push({
+                  uuid: opp.uuid,
+                  company: opp.company_id,
+                  probability: opp.probability,
+                  value: opp.estimated_value,
+                  days_to_close: Math.round(daysToClose)
+                });
+              }
+            }
+          });
+          
+          // Calculate metrics
+          analysis.metrics.avg_deal_size = analysis.total_value / analysis.total_opportunities;
+          analysis.metrics.win_probability_weighted = opportunities.reduce((sum, opp) => 
+            sum + (opp.estimated_value * opp.probability / 100), 0);
+          
+          // Generate action items
+          if (analysis.stuck_deals.length > 0) {
+            analysis.actions_needed.push({
+              priority: 'high',
+              action: 'Review stuck deals',
+              count: analysis.stuck_deals.length,
+              details: 'Multiple deals haven\\'t been updated in over 7 days'
+            });
+          }
+          
+          if (analysis.at_risk.length > 0) {
+            analysis.actions_needed.push({
+              priority: 'high',
+              action: 'Address at-risk deals',
+              count: analysis.at_risk.length,
+              details: 'Deals with low probability closing soon'
+            });
+          }
+          
+          if (analysis.closing_soon.length > 0) {
+            analysis.actions_needed.push({
+              priority: 'medium',
+              action: 'Focus on closing deals',
+              count: analysis.closing_soon.length,
+              details: 'Deals expected to close within 7 days'
+            });
+          }
+          
+          return [{ json: analysis }];
+        `
+      }
+    },
+    {
+      "name": "Get Sales Team",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "users",
+        "filters": {
+          "filterType": "formula",
+          "formula": "AND({department_id} = 'sales', {is_active} = 'Actif')"
+        }
+      }
+    },
+    {
+      "name": "Create Daily Report",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const analysis = items[0].json;
+          const salesTeam = items[1].json;
+          
+          const report = {
+            date: new Date().toISOString().split('T')[0],
+            summary: {
+              total_opportunities: analysis.total_opportunities,
+              total_pipeline_value: \`€\${(analysis.total_value / 1000).toFixed(1)}k\`,
+              weighted_value: \`€\${(analysis.metrics.win_probability_weighted / 1000).toFixed(1)}k\`,
+              avg_deal_size: \`€\${(analysis.metrics.avg_deal_size / 1000).toFixed(1)}k\`
+            },
+            alerts: {
+              stuck_deals: analysis.stuck_deals.length,
+              at_risk_deals: analysis.at_risk.length,
+              closing_soon: analysis.closing_soon.length
+            },
+            action_items: analysis.actions_needed,
+            next_steps: []
+          };
+          
+          // Generate specific action items
+          analysis.stuck_deals.forEach(deal => {
+            report.next_steps.push({
+              type: 'follow_up',
+              deal_id: deal.uuid,
+              priority: 'high',
+              suggested_action: \`Contact \${deal.company} - stuck for \${deal.days_stuck} days\`,
+              value: deal.value
+            });
+          });
+          
+          analysis.closing_soon.forEach(deal => {
+            report.next_steps.push({
+              type: 'close_deal',
+              deal_id: deal.uuid,
+              priority: 'high',
+              suggested_action: \`Push to close \${deal.company} - \${deal.days_to_close} days remaining\`,
+              value: deal.value
+            });
+          });
+          
+          return [{ json: report }];
+        `
+      }
+    },
+    {
+      "name": "Send Manager Report",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "{{ $json.managerEmail || 'manager@company.com' }}",
+        "subject": "Daily Pipeline Health Report - {{ $json.date }}",
+        "emailFormat": "html",
+        "message": `
+          <h2>Pipeline Health Report</h2>
+          <p>Date: {{ $json.date }}</p>
+          
+          <h3>Summary</h3>
+          <ul>
+            <li>Total Opportunities: {{ $json.summary.total_opportunities }}</li>
+            <li>Pipeline Value: {{ $json.summary.total_pipeline_value }}</li>
+            <li>Weighted Value: {{ $json.summary.weighted_value }}</li>
+            <li>Average Deal Size: {{ $json.summary.avg_deal_size }}</li>
+          </ul>
+          
+          <h3>Alerts</h3>
+          <ul>
+            <li style="color: red;">🚨 Stuck Deals: {{ $json.alerts.stuck_deals }}</li>
+            <li style="color: orange;">⚠️ At-Risk Deals: {{ $json.alerts.at_risk_deals }}</li>
+            <li style="color: green;">✅ Closing Soon: {{ $json.alerts.closing_soon }}</li>
+          </ul>
+          
+          <h3>Action Items</h3>
+          {{#each action_items}}
+          <p><strong>{{ this.priority.toUpperCase() }} PRIORITY:</strong> {{ this.action }} ({{ this.count }} deals)</p>
+          {{/each}}
+          
+          <h3>Next Steps</h3>
+          <table border="1" style="border-collapse: collapse; width: 100%;">
+            <tr style="background-color: #f2f2f2;">
+              <th>Priority</th>
+              <th>Action</th>
+              <th>Value</th>
+            </tr>
+            {{#each next_steps}}
+            <tr>
+              <td>{{ this.priority }}</td>
+              <td>{{ this.suggested_action }}</td>
+              <td>€{{ this.value }}</td>
+            </tr>
+            {{/each}}
+          </table>
+        `
+      }
+    },
+    {
+      "name": "Notify Sales Reps",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const report = items[0].json;
+          const salesTeam = items[1].json;
+          
+          // Create individual notifications for sales reps
+          const notifications = salesTeam.map(rep => {
+            const repDeals = report.next_steps.filter(step => 
+              // This would need to be enhanced with proper user assignment logic
+              true // For now, send to all reps
+            );
+            
+            return {
+              to: rep.email,
+              name: rep.first_name,
+              dealCount: repDeals.length,
+              highPriorityCount: repDeals.filter(d => d.priority === 'high').length,
+              deals: repDeals
+            };
+          });
+          
+          return notifications.map(n => ({ json: n }));
+        `
+      }
+    },
+    {
+      "name": "Send Individual Notifications",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "{{ $json.to }}",
+        "subject": "Your Pipeline Action Items - {{ $now('YYYY-MM-DD') }}",
+        "emailFormat": "html",
+        "message": `
+          <h2>Good Morning {{ $json.name }}!</h2>
+          
+          <p>Here are your action items for today:</p>
+          
+          <h3>Summary</h3>
+          <ul>
+            <li>Total Action Items: {{ $json.dealCount }}</li>
+            <li>High Priority: {{ $json.highPriorityCount }}</li>
+          </ul>
+          
+          <h3>Action Items</h3>
+          <table border="1" style="border-collapse: collapse; width: 100%;">
+            <tr style="background-color: #f2f2f2;">
+              <th>Priority</th>
+              <th>Action</th>
+              <th>Value</th>
+            </tr>
+            {{#each deals}}
+            <tr style="{{#if (eq this.priority 'high')}}background-color: #ffebee;{{/if}}">
+              <td>{{ this.priority }}</td>
+              <td>{{ this.suggested_action }}</td>
+              <td>€{{ this.value }}</td>
+            </tr>
+            {{/each}}
+          </table>
+          
+          <p><strong>Let's make it a great day! 🎯</strong></p>
+        `
+      }
+    },
+    {
+      "name": "Update KPI Results",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "kpi_results",
+        "fields": {
+          "kpi_definition_id": "pipeline_health",
+          "value": "={{ $json.alerts.stuck_deals }}",
+          "target_value": "3",
+          "achievement_rate": "={{ 100 - Math.min(100, $json.alerts.stuck_deals * 33) }}",
+          "period_start": "={{ $now('YYYY-MM-DD') }}",
+          "period_end": "={{ $now('YYYY-MM-DD') }}",
+          "calculated_at": "{{ $now() }}",
+          "calculated_by": "system",
+          "details": "Daily pipeline health check - Stuck deals metric"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Trigger": {
+      "main": [[
+        {
+          "node": "Get All Opportunities",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get All Opportunities": {
+      "main": [[
+        {
+          "node": "Analyze Pipeline Health",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Analyze Pipeline Health": {
+      "main": [[
+        {
+          "node": "Get Sales Team",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get Sales Team": {
+      "main": [[
+        {
+          "node": "Create Daily Report",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create Daily Report": {
+      "main": [[
+        {
+          "node": "Send Manager Report",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Notify Sales Reps",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Update KPI Results",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Notify Sales Reps": {
+      "main": [[
+        {
+          "node": "Send Individual Notifications",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    }
+  }
+}
