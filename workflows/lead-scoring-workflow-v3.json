@@ -1,0 +1,233 @@
+{
+  "name": "Lead Scoring v3 - Enhanced Financial Storage",
+  "nodes": [
+    {
+      "name": "Airtable Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "parameters": {
+        "table": "companies",
+        "event": "recordCreated"
+      },
+      "position": [100, 300]
+    },
+    {
+      "name": "Extract Company Data",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "// Extraire et structurer les données du lead\nlet data = {};\n\nif (items && items.length > 0 && items[0].json && items[0].json.fields) {\n  data = items[0].json.fields;\n} else {\n  return [{json: {error: 'No data received from trigger'}}];\n}\n\n// Préparer les données pour le scraping\nconst result = {\n  ...data,\n  recordId: items[0].json.id,\n  // Nettoyer les données pour la recherche\n  searchName: data.name ? data.name.replace(/[^a-zA-Z0-9 ]/g, '') : '',\n  searchDomain: data.domain || '',\n  searchCountry: data.country || 'France',\n  // Préparer pour logs\n  scrapingStartTime: Date.now()\n};\n\nreturn [{ json: result }];"
+      },
+      "position": [300, 300]
+    },
+    {
+      "name": "Scrape Financial Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.pappers.fr/v2/entreprise",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api_token",
+              "value": "YOUR_PAPPERS_API_TOKEN"
+            },
+            {
+              "name": "entreprise",
+              "value": "={{ $json.searchName }}"
+            },
+            {
+              "name": "date_de_mise_a_jour",
+              "value": "2023-01-01"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "position": [500, 300]
+    },
+    {
+      "name": "Log Scraping Attempt",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "scraping_logs",
+        "fields": {
+          "uuid": "{{ $json.scrapingStartTime }}-{{ $json.recordId }}",
+          "company_id": "{{ $json.recordId }}",
+          "source": "Pappers",
+          "status": "{{ $json.statusCode === 200 ? 'Success' : 'Failed' }}",
+          "data_found": "{{ $json.body && $json.body.entreprise ? 'Oui' : 'Non' }}",
+          "api_response": "{{ JSON.stringify($json.body) }}",
+          "error_message": "{{ $json.error ? $json.error : '' }}",
+          "processing_time": "{{ Date.now() - $json.scrapingStartTime }}",
+          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [700, 400]
+    },
+    {
+      "name": "Process Financial Data",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const companyData = items[0].json;\nconst scraperResponse = items[1].json;\nconst scrapingLog = items[2].json;\n\nlet financialEntries = [];\nlet latestFinancial = null;\nlet financialScore = 0;\nlet revenueTrend = 'Unknown';\n\n// Parser les données si disponibles\nif (scraperResponse && scraperResponse.body && scraperResponse.body.entreprise) {\n  const entreprise = scraperResponse.body.entreprise;\n  const finances = entreprise.finances || [];\n  \n  // Créer une entrée pour chaque année disponible\n  finances.forEach((finance) => {\n    const year = new Date(finance.date_cloture_exercice).getFullYear();\n    const revenue = finance.chiffre_affaires;\n    \n    financialEntries.push({\n      uuid: `${companyData.recordId}-${year}`,\n      company_id: companyData.recordId,\n      source: 'Pappers',\n      year: year,\n      revenue: revenue,\n      employees: finance.resultat_net || 0,\n      raw_data: JSON.stringify(finance),\n      confidence_score: 85,\n      last_updated: new Date().toISOString(),\n      created_at: new Date().toISOString()\n    });\n  });\n  \n  // Analyser la tendance\n  if (finances.length >= 2) {\n    const currentCA = finances[0].chiffre_affaires || 0;\n    const previousCA = finances[1].chiffre_affaires || 0;\n    const growthRate = previousCA > 0 ? ((currentCA - previousCA) / previousCA) * 100 : 0;\n    \n    if (growthRate > 20) {\n      revenueTrend = 'Strong Growth';\n      financialScore += 25;\n    } else if (growthRate > 10) {\n      revenueTrend = 'Moderate Growth';\n      financialScore += 15;\n    } else if (growthRate < -10) {\n      revenueTrend = 'Decline';\n      financialScore += 20; // Les entreprises en difficulté aussi\n    } else {\n      revenueTrend = 'Stable';\n      financialScore += 10;\n    }\n    \n    // Préparer les données les plus récentes\n    latestFinancial = {\n      revenue: currentCA,\n      growth_rate: growthRate\n    };\n  }\n  \n  // Score basé sur la taille (favoriser TPE/PME)\n  if (latestFinancial && latestFinancial.revenue) {\n    if (latestFinancial.revenue < 2000000) {\n      financialScore += 30; // TPE\n    } else if (latestFinancial.revenue < 10000000) {\n      financialScore += 25; // PME\n    } else if (latestFinancial.revenue < 50000000) {\n      financialScore += 15; // ETI\n    } else {\n      financialScore += 5; // GE\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...companyData,\n    financialEntries: financialEntries,\n    latestFinancial: latestFinancial,\n    financialScore: financialScore,\n    revenueTrend: revenueTrend,\n    scrapingSuccess: financialEntries.length > 0\n  }\n}];"
+      },
+      "position": [700, 300]
+    },
+    {
+      "name": "Store Financial History",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "company_financials",
+        "fields": {
+          "uuid": "{{ $json.financialEntries[0].uuid }}",
+          "company_id": "{{ $json.financialEntries[0].company_id }}",
+          "source": "{{ $json.financialEntries[0].source }}",
+          "year": "{{ $json.financialEntries[0].year }}",
+          "revenue": "{{ $json.financialEntries[0].revenue }}",
+          "growth_rate": "{{ $json.latestFinancial?.growth_rate || 0 }}",
+          "employees": "{{ $json.financialEntries[0].employees }}",
+          "raw_data": "{{ $json.financialEntries[0].raw_data }}",
+          "confidence_score": "{{ $json.financialEntries[0].confidence_score }}",
+          "last_updated": "{{ $json.financialEntries[0].last_updated }}",
+          "created_at": "{{ $json.financialEntries[0].created_at }}"
+        }
+      },
+      "position": [900, 200]
+    },
+    {
+      "name": "Update Company Summary",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "update",
+        "table": "companies",
+        "recordId": "={{ $json.recordId }}",
+        "fields": {
+          "latest_revenue": "{{ $json.latestFinancial?.revenue || 0 }}",
+          "revenue_trend": "{{ $json.revenueTrend }}",
+          "financial_score": "{{ $json.financialScore }}",
+          "last_financial_check": "{{ $now('YYYY-MM-DD') }}",\n          "assigned_to": "{{ $json.assignedTo || '' }}",\n          "lead_score": "{{ ($json.leadScore || 0) + $json.financialScore }}",\n          "priority": "{{ $json.priority || 'medium' }}"\n        }\n      },\n      "position": [900, 300]\n    },\n    {
+      "name": "Calculate Final Score",\n      "type": "n8n-nodes-base.function",\n      "parameters": {\n        "functionCode": "const data = items[0].json;\nlet totalScore = 0;\n\n// Base scoring (modifié pour TPE/PME)\nif (data.size_category) {\n  switch(data.size_category) {\n    case 'TPE (1-10)': totalScore += 30; break;\n    case 'PME (11-50)': totalScore += 25; break;\n    case 'ETI (51-250)': totalScore += 15; break;\n    case 'GE (250+)': totalScore += 5; break;\n  }\n}\n\n// Ajout du score financier\ntotalScore += data.financialScore || 0;\n\n// Déterminer la priorité basée sur le score et la tendance\nlet finalPriority = 'low';\nlet urgency = 'medium';\n\nif (totalScore > 80) {\n  finalPriority = 'high';\n} else if (totalScore > 60) {\n  finalPriority = 'medium';\n}\n\n// Ajuster basé sur la tendance financière\nif (data.revenueTrend === 'Strong Growth' || data.revenueTrend === 'Decline') {\n  urgency = 'high';\n  if (finalPriority !== 'low') {\n    finalPriority = 'high';\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    leadScore: totalScore,\n    priority: finalPriority,\n    urgency: urgency,\n    actionableInsights: {\n      message: data.revenueTrend === 'Strong Growth' \n        ? 'Entreprise en forte croissance - opportunité d\\'expansion'\n        : data.revenueTrend === 'Decline'\n        ? 'Entreprise en difficulté - solution urgente nécessaire'\n        : 'Entreprise stable - focus sur la valeur ajoutée',\n      recommendedTimeline: urgency === 'high' ? '2 heures' : finalPriority === 'high' ? '24 heures' : '48 heures'\n    }\n  }\n}];"
+      },
+      "position": [1100, 300]
+    },
+    {
+      "name": "Get Available Sales Reps",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "users",
+        "filterByFormula": "AND({is_active} = 'Actif', {department_id} = 'sales')"
+      },
+      "position": [1300, 300]
+    },
+    {
+      "name": "Assign with Context",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const lead = items[0].json;\nconst salesReps = items[1].json;\n\nif (!salesReps || salesReps.length === 0) {\n  return [{json: {error: 'No sales reps available'}}];\n}\n\n// Assignment intelligent basé sur urgency et expertise\nlet assignedRep = salesReps[0]; // Default\n\nif (lead.urgency === 'high') {\n  // Chercher un commercial senior\n  const seniorRep = salesReps.find(rep => \n    rep.fields?.experience_level === 'senior' || \n    rep.fields?.title?.includes('Senior')\n  );\n  if (seniorRep) assignedRep = seniorRep;\n}\n\n// Actions contextuelles\nlet nextActions = [];\nif (lead.urgency === 'high') {\n  nextActions = [\n    { \n      type: 'Call', \n      priority: 'urgent', \n      deadline: '2h',\n      note: `${lead.revenueTrend} - ${lead.actionableInsights.message}`\n    },\n    { \n      type: 'Email', \n      template: 'urgent_outreach',\n      context: lead.actionableInsights.message\n    }\n  ];\n} else {\n  nextActions = [\n    { \n      type: 'Email', \n      template: 'tpe_pme_intro',\n      context: lead.actionableInsights.message\n    },\n    { \n      type: 'Call', \n      priority: lead.priority, \n      deadline: lead.actionableInsights.recommendedTimeline\n    }\n  ];\n}\n\nreturn [{\n  json: {\n    ...lead,\n    assignedTo: assignedRep.uuid || assignedRep.fields?.uuid,\n    assignedEmail: assignedRep.email || assignedRep.fields?.email,\n    nextActions: nextActions,\n    financialContext: {\n      revenue: lead.latestFinancial?.revenue || 'unknown',\n      trend: lead.revenueTrend,\n      confidence: 'High' // Basé sur Pappers\n    }\n  }\n}];"
+      },
+      "position": [1500, 300]
+    },
+    {
+      "name": "Create Enhanced Activity",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "lead_activities",
+        "fields": {
+          "uuid": "{{ $now() }}",
+          "company_id": "={{ $json.recordId }}",
+          "user_id": "={{ $json.assignedTo }}",
+          "type": "{{ $json.nextActions[0].type }}",
+          "title": "{{ $json.urgency.toUpperCase() }} - {{ $json.name }} ({{ $json.revenueTrend }})",
+          "description": "Score: {{ $json.leadScore }}/100\\nCA: {{ $json.financialContext.revenue }}\\nTendance: {{ $json.financialContext.trend }}\\nAction: {{ $json.actionableInsights.message }}",
+          "scheduled_at": "{{ $now('YYYY-MM-DD') }}",
+          "created_at": "{{ $now('YYYY-MM-DD') }}",
+          "outcome": "",
+          "next_action": "{{ $json.nextActions[1]?.type || 'Follow-up' }}"
+        }
+      },
+      "position": [1700, 400]
+    },
+    {
+      "name": "Enhanced Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "={{ $json.assignedEmail }}",
+        "subject": "🔥 {{ $json.urgency.toUpperCase() }} Lead: {{ $json.name }} - {{ $json.revenueTrend }}",
+        "emailFormat": "html",
+        "message": "<div style='font-family: Arial, sans-serif;'>\n  <h2>Nouveau Lead Qualifié - {{ $json.name }}</h2>\n  \n  <div style='background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;'>\n    <h3>📊 Données Financières</h3>\n    <ul>\n      <li>CA Récent: <strong>{{ $json.financialContext.revenue || 'N/A' }}</strong></li>\n      <li>Tendance: <span style='color: {{ $json.revenueTrend === \"Strong Growth\" ? \"green\" : $json.revenueTrend === \"Decline\" ? \"red\" : \"black\" }};'><strong>{{ $json.revenueTrend }}</strong></span></li>\n      <li>Score Total: <strong>{{ $json.leadScore }}/100</strong></li>\n    </ul>\n  </div>\n  \n  <div style='background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;'>\n    <h3>💡 Insights</h3>\n    <p><strong>{{ $json.actionableInsights.message }}</strong></p>\n    <p>⏰ Action recommandée sous: <strong>{{ $json.actionableInsights.recommendedTimeline }}</strong></p>\n  </div>\n  \n  <h3>📋 Actions Immédiates</h3>\n  <ol>\n    {{#each nextActions}}\n    <li>{{ this.type }} - {{ this.note || this.context }}</li>\n    {{/each}}\n  </ol>\n  \n  <div style='margin-top: 30px;'>\n    <a href='https://airtable.com/[YOUR_BASE_ID]/tblY1PyOUlM7cHI6e/{{ $json.recordId }}' \n       style='background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;'>\n      Accéder au CRM\n    </a>\n  </div>\n</div>"
+      },
+      "position": [1700, 600]
+    },
+    {
+      "name": "Complete Audit Log",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "audit_logs",
+        "fields": {
+          "table_name": "companies",
+          "entity_id": "={{ $json.recordId }}",
+          "action": "Lead Qualified & Assigned",
+          "old_values": "",
+          "new_values": "Score: {{ $json.leadScore }}, Urgency: {{ $json.urgency }}, CA: {{ $json.financialContext.revenue }}, Tendance: {{ $json.revenueTrend }}, Assigné à: {{ $json.assignedEmail }}",
+          "user_id": "system",
+          "ip_address": "n8n-automation",
+          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [1900, 600]
+    }
+  ],
+  "connections": {
+    "Airtable Trigger": {
+      "main": [[{ "node": "Extract Company Data", "type": "main", "index": 0 }]]
+    },
+    "Extract Company Data": {
+      "main": [[{ "node": "Scrape Financial Data", "type": "main", "index": 0 }]]
+    },
+    "Scrape Financial Data": {
+      "main": [[
+        { "node": "Log Scraping Attempt", "type": "main", "index": 0 },
+        { "node": "Process Financial Data", "type": "main", "index": 0 }
+      ]]
+    },
+    "Log Scraping Attempt": {
+      "main": [[{ "node": "Process Financial Data", "type": "main", "index": 1 }]]
+    },
+    "Process Financial Data": {
+      "main": [[
+        { "node": "Store Financial History", "type": "main", "index": 0 },
+        { "node": "Calculate Final Score", "type": "main", "index": 0 }
+      ]]
+    },
+    "Store Financial History": {
+      "main": [[{ "node": "Update Company Summary", "type": "main", "index": 0 }]]
+    },
+    "Calculate Final Score": {
+      "main": [[{ "node": "Get Available Sales Reps", "type": "main", "index": 0 }]]
+    },
+    "Get Available Sales Reps": {
+      "main": [[{ "node": "Assign with Context", "type": "main", "index": 0 }]]
+    },
+    "Assign with Context": {
+      "main": [[
+        { "node": "Update Company Summary", "type": "main", "index": 1 },
+        { "node": "Create Enhanced Activity", "type": "main", "index": 0 },
+        { "node": "Enhanced Notification", "type": "main", "index": 0 }
+      ]]
+    },
+    "Create Enhanced Activity": {
+      "main": [[{ "node": "Complete Audit Log", "type": "main", "index": 0 }]]
+    }
+  }
+}
