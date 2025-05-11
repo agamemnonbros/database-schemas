@@ -1,0 +1,159 @@
+{
+  "name": "Lead Scoring & Assignment (Corrigé)",
+  "nodes": [
+    {
+      "name": "Airtable Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "parameters": {
+        "table": "companies",
+        "event": "recordCreated"
+      },
+      "position": [100, 300]
+    },
+    {
+      "name": "Calculate Lead Score",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "// Scoring algorithm\nlet score = 0;\nlet data = {};\n\n// Vérifier si nous avons des données\nif (items && items.length > 0 && items[0].json && items[0].json.fields) {\n  data = items[0].json.fields;\n} else {\n  return [{json: {error: 'No data received from trigger'}}];\n}\n\n// Company size scoring\nif (data.size_category) {\n  switch(data.size_category) {\n    case 'GE (250+)': score += 30; break;\n    case 'ETI (51-250)': score += 20; break;\n    case 'PME (11-50)': score += 15; break;\n    case 'TPE (1-10)': score += 5; break;\n  }\n}\n\n// Industry scoring (example)\nconst targetIndustries = ['Technology', 'SaaS', 'Finance'];\nif (data.industry && targetIndustries.includes(data.industry)) {\n  score += 25;\n}\n\n// Geographic scoring\nif (data.country === 'France') {\n  score += 15;\n}\n\n// Add metadata for routing\nconst result = {\n  ...data,\n  recordId: items[0].json.id, // Récupérer l'ID du record\n  leadScore: score,\n  priority: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',\n  scoreBreakdown: {\n    companySize: data.size_category ? (score >= 30 ? 30 : score >= 20 ? 20 : score >= 15 ? 15 : 5) : 0,\n    industry: (data.industry && targetIndustries.includes(data.industry)) ? 25 : 0,\n    geography: data.country === 'France' ? 15 : 0\n  }\n};\n\nreturn [{ json: result }];"
+      },
+      "position": [300, 300]
+    },
+    {
+      "name": "Get Available Sales Reps",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "users",
+        "filterByFormula": "AND({is_active} = 'Actif', {department_id} = 'sales')"
+      },
+      "position": [500, 300]
+    },
+    {
+      "name": "Assign Lead",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const lead = items[0].json;\nconst salesRepsList = items[1].json;\n\n// Vérifier si on a des commercial disponibles\nif (!salesRepsList || salesRepsList.length === 0) {\n  return [{json: {error: 'No sales reps available'}}];\n}\n\n// Simple round-robin assignment - prendre le premier disponible\nconst assignedRep = salesRepsList[0];\n\n// Déterminer les actions suivantes basées sur le score\nlet nextActions = [];\nif (lead.leadScore > 70) {\n  nextActions = [\n    { type: 'Call', priority: 'high', deadline: '24h' },\n    { type: 'Email', template: 'high_value_intro' }\n  ];\n} else if (lead.leadScore > 40) {\n  nextActions = [\n    { type: 'Email', template: 'standard_intro' },\n    { type: 'Call', priority: 'medium', deadline: '48h' }\n  ];\n} else {\n  nextActions = [\n    { type: 'Email', template: 'nurturing_sequence' }\n  ];\n}\n\nreturn [{\n  json: {\n    leadId: lead.uuid || lead.recordId,\n    leadRecordId: lead.recordId,\n    assignedTo: assignedRep.uuid,\n    assignedEmail: assignedRep.email,\n    leadScore: lead.leadScore,\n    priority: lead.priority,\n    nextActions: nextActions,\n    companyName: lead.name || 'Unknown Company',\n    assignmentReason: 'Automatic assignment based on availability and score'\n  }\n}];"
+      },
+      "position": [700, 300]
+    },
+    {
+      "name": "Update Lead in Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "update",
+        "table": "companies",
+        "recordId": "={{ $json.leadRecordId }}",
+        "fields": {
+          "assigned_to": "={{ $json.assignedTo }}",
+          "lead_score": "={{ $json.leadScore }}",
+          "priority": "={{ $json.priority }}"
+        }
+      },
+      "position": [900, 200]
+    },
+    {
+      "name": "Create Activities",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "lead_activities",
+        "fields": {
+          "uuid": "{{ $now() }}",
+          "company_id": "={{ $json.leadId }}",
+          "user_id": "={{ $json.assignedTo }}",
+          "type": "{{ $json.nextActions[0].type }}",
+          "title": "Follow-up on new lead - Priority: {{ $json.priority }}",
+          "scheduled_at": "{{ $now('YYYY-MM-DD') }}",
+          "description": "Automatically scheduled based on lead score of {{ $json.leadScore }}",
+          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [900, 400]
+    },
+    {
+      "name": "Notify Sales Rep",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "={{ $json.assignedEmail }}",
+        "subject": "New Lead Assigned - {{ $json.priority }} Priority",
+        "emailFormat": "html",
+        "message": "<h2>New Lead Assignment</h2>\n<p>You've been assigned a new lead with a score of {{ $json.leadScore }}/100</p>\n\n<h3>Lead Details:</h3>\n<ul>\n  <li>Company: {{ $json.companyName }}</li>\n  <li>Priority: {{ $json.priority }}</li>\n  <li>Score: {{ $json.leadScore }}/100</li>\n</ul>\n\n<h3>Recommended Actions:</h3>\n<ul>\n  {{#each nextActions}}\n  <li>{{ this.type }} - Priority: {{ this.priority }}</li>\n  {{/each}}\n</ul>\n\n<a href=\"https://airtable.com/[YOUR_BASE_ID]/tblY1PyOUlM7cHI6e/{{ $json.leadRecordId }}\">View in CRM</a>"
+      },
+      "position": [900, 600]
+    },
+    {
+      "name": "Log in Audit",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "audit_logs",
+        "fields": {
+          "table_name": "companies",
+          "entity_id": "={{ $json.leadRecordId }}",
+          "action": "Création",
+          "new_values": "{{ JSON.stringify($json) }}",
+          "user_id": "system",
+          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [1100, 600]
+    }
+  ],
+  "connections": {
+    "Airtable Trigger": {
+      "main": [[
+        {
+          "node": "Calculate Lead Score",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Calculate Lead Score": {
+      "main": [[
+        {
+          "node": "Get Available Sales Reps",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get Available Sales Reps": {
+      "main": [[
+        {
+          "node": "Assign Lead",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Assign Lead": {
+      "main": [[
+        {
+          "node": "Update Lead in Airtable",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Create Activities",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Notify Sales Rep",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create Activities": {
+      "main": [[
+        {
+          "node": "Log in Audit",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    }
+  }
+}
