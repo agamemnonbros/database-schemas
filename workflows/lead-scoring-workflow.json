@@ -1,0 +1,246 @@
+{
+  "name": "Lead Scoring & Assignment",
+  "nodes": [
+    {
+      "name": "Airtable Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "parameters": {
+        "table": "companies",
+        "event": "recordCreated"
+      }
+    },
+    {
+      "name": "Calculate Lead Score",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          // Scoring algorithm
+          let score = 0;
+          const data = items[0].json;
+          
+          // Company size scoring
+          switch(data.size_category) {
+            case 'GE (250+)': score += 30; break;
+            case 'ETI (51-250)': score += 20; break;
+            case 'PME (11-50)': score += 15; break;
+            case 'TPE (1-10)': score += 5; break;
+          }
+          
+          // Industry scoring (example)
+          const targetIndustries = ['Technology', 'SaaS', 'Finance'];
+          if (targetIndustries.includes(data.industry)) {
+            score += 25;
+          }
+          
+          // Geographic scoring
+          if (data.country === 'France') {
+            score += 15;
+          }
+          
+          // Add metadata for routing
+          const result = {
+            ...data,
+            leadScore: score,
+            priority: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
+            scoreBreakdown: {
+              companySize: score >= 30 ? 30 : score >= 20 ? 20 : score >= 15 ? 15 : 5,
+              industry: targetIndustries.includes(data.industry) ? 25 : 0,
+              geography: data.country === 'France' ? 15 : 0
+            }
+          };
+          
+          return [{ json: result }];
+        `
+      }
+    },
+    {
+      "name": "Get Available Sales Reps",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "users",
+        "filters": {
+          "filterType": "formula",
+          "formula": "AND({is_active} = 'Actif', {department_id} = 'sales')"
+        }
+      }
+    },
+    {
+      "name": "Assign Lead",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const lead = items[0].json;
+          const salesReps = items[1].json;
+          
+          // Simple round-robin assignment
+          // In production, consider workload, expertise, etc.
+          const assignedRep = salesReps[0];
+          
+          // Determine next actions based on score
+          let nextActions = [];
+          if (lead.leadScore > 70) {
+            nextActions = [
+              { type: 'Call', priority: 'high', deadline: '24h' },
+              { type: 'Email', template: 'high_value_intro' }
+            ];
+          } else if (lead.leadScore > 40) {
+            nextActions = [
+              { type: 'Email', template: 'standard_intro' },
+              { type: 'Call', priority: 'medium', deadline: '48h' }
+            ];
+          } else {
+            nextActions = [
+              { type: 'Email', template: 'nurturing_sequence' }
+            ];
+          }
+          
+          return [{
+            json: {
+              leadId: lead.uuid,
+              assignedTo: assignedRep.uuid,
+              assignedEmail: assignedRep.email,
+              leadScore: lead.leadScore,
+              priority: lead.priority,
+              nextActions: nextActions,
+              assignmentReason: 'Automatic assignment based on availability and score'
+            }
+          }];
+        `
+      }
+    },
+    {
+      "name": "Update Lead in Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "update",
+        "table": "companies",
+        "recordId": "={{ $json.leadId }}",
+        "fields": {
+          "assigned_to": "={{ $json.assignedTo }}",
+          "lead_score": "={{ $json.leadScore }}",
+          "priority": "={{ $json.priority }}"
+        }
+      }
+    },
+    {
+      "name": "Create Activities",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "lead_activities",
+        "fields": {
+          "uuid": "={{ $now() }}",
+          "company_id": "={{ $json.leadId }}",
+          "user_id": "={{ $json.assignedTo }}",
+          "type": "{{ $json.nextActions[0].type }}",
+          "title": "Follow-up on new lead - Priority: {{ $json.priority }}",
+          "scheduled_at": "={{ $now('YYYY-MM-DD') }}",
+          "description": "Automatically scheduled based on lead score of {{ $json.leadScore }}"
+        }
+      }
+    },
+    {
+      "name": "Notify Sales Rep",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "={{ $json.assignedEmail }}",
+        "subject": "New Lead Assigned - {{ $json.priority }} Priority",
+        "emailFormat": "html",
+        "message": `
+          <h2>New Lead Assignment</h2>
+          <p>You've been assigned a new lead with a score of {{ $json.leadScore }}/100</p>
+          
+          <h3>Lead Details:</h3>
+          <ul>
+            <li>Company: {{ $json.companyName }}</li>
+            <li>Priority: {{ $json.priority }}</li>
+            <li>Score: {{ $json.leadScore }}/100</li>
+          </ul>
+          
+          <h3>Recommended Actions:</h3>
+          <ul>
+            {{#each nextActions}}
+            <li>{{ this.type }} - Priority: {{ this.priority }}</li>
+            {{/each}}
+          </ul>
+          
+          <a href="https://airtable.com/[YOUR_BASE_ID]/tblY1PyOUlM7cHI6e/{{ $json.leadId }}">View in CRM</a>
+        `
+      }
+    },
+    {
+      "name": "Log in Audit",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "audit_logs",
+        "fields": {
+          "table_name": "companies",
+          "entity_id": "={{ $json.leadId }}",
+          "action": "Création",
+          "new_values": "={{ JSON.stringify($json) }}",
+          "user_id": "system",
+          "created_at": "={{ $now() }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Airtable Trigger": {
+      "main": [[
+        {
+          "node": "Calculate Lead Score",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Calculate Lead Score": {
+      "main": [[
+        {
+          "node": "Get Available Sales Reps",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get Available Sales Reps": {
+      "main": [[
+        {
+          "node": "Assign Lead",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Assign Lead": {
+      "main": [[
+        {
+          "node": "Update Lead in Airtable",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Create Activities",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Notify Sales Rep",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create Activities": {
+      "main": [[
+        {
+          "node": "Log in Audit",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    }
+  }
+}
