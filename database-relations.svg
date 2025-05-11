@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
+  <!-- Styles -->
+  <defs>
+    <style>
+      .table { fill: #ffffff; stroke: #333333; stroke-width: 2; }
+      .central { fill: #f0f8ff; }
+      .sales { fill: #fff5ee; }
+      .finance { fill: #f0fff0; }
+      .kpi { fill: #fff0f5; }
+      .text { font-family: Arial, sans-serif; font-size: 12px; fill: #333333; }
+      .title { font-weight: bold; font-size: 14px; }
+      .line { stroke: #666666; stroke-width: 1; }
+      .link { stroke: #0066cc; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+
+  <!-- Titre -->
+  <text x="600" y="30" text-anchor="middle" class="text title" font-size="20">SCHÉMA DES RELATIONS - BASE DE DONNÉES</text>
+
+  <!-- Tables Centrales -->
+  <rect x="10" y="50" width="200" height="100" class="table central"/>
+  <text x="110" y="70" text-anchor="middle" class="text title">COMPANIES</text>
+  <text x="20" y="85" class="text">• id (PK)</text>
+  <text x="20" y="100" class="text">• uuid</text>
+  <text x="20" y="115" class="text">• name</text>
+  <text x="20" y="130" class="text">• status</text>
+
+  <rect x="10" y="170" width="200" height="80" class="table central"/>
+  <text x="110" y="190" text-anchor="middle" class="text title">CONTACTS</text>
+  <text x="20" y="205" class="text">• id (PK)</text>
+  <text x="20" y="220" class="text">• company_id (FK)</text>
+  <text x="20" y="235" class="text">• first_name</text>
+
+  <rect x="230" y="50" width="200" height="100" class="table central"/>
+  <text x="330" y="70" text-anchor="middle" class="text title">USERS</text>
+  <text x="240" y="85" class="text">• id (PK)</text>
+  <text x="240" y="100" class="text">• email</text>
+  <text x="240" y="115" class="text">• department_id (FK)</text>
+  <text x="240" y="130" class="text">• is_active</text>
+
+  <!-- Tables Vente -->
+  <rect x="450" y="50" width="200" height="120" class="table sales"/>
+  <text x="550" y="70" text-anchor="middle" class="text title">LEAD_STAGES</text>
+  <text x="460" y="85" class="text">• id (PK)</text>
+  <text x="460" y="100" class="text">• name</text>
+  <text x="460" y="115" class="text">• order_position</text>
+  <text x="460" y="130" class="text">• department_id (FK)</text>
+
+  <rect x="450" y="190" width="200" height="140" class="table sales"/>
+  <text x="550" y="210" text-anchor="middle" class="text title">LEAD_ACTIVITIES</text>
+  <text x="460" y="225" class="text">• id (PK)</text>
+  <text x="460" y="240" class="text">• company_id (FK)</text>
+  <text x="460" y="255" class="text">• contact_id (FK)</text>
+  <text x="460" y="270" class="text">• user_id (FK)</text>
+  <text x="460" y="285" class="text">• type</text>
+  <text x="460" y="300" class="text">• scheduled_at</text>
+
+  <rect x="670" y="50" width="200" height="160" class="table sales"/>
+  <text x="770" y="70" text-anchor="middle" class="text title">PIPELINE_OPPS</text>
+  <text x="680" y="85" class="text">• id (PK)</text>
+  <text x="680" y="100" class="text">• company_id (FK)</text>
+  <text x="680" y="115" class="text">• stage_id (FK)</text>
+  <text x="680" y="130" class="text">• user_id (FK)</text>
+  <text x="680" y="145" class="text">• estimated_value</text>
+  <text x="680" y="160" class="text">• expected_close_date</text>
+
+  <!-- Tables Finance -->
+  <rect x="450" y="360" width="200" height="120" class="table finance"/>
+  <text x="550" y="380" text-anchor="middle" class="text title">FINANCE_QUOTES</text>
+  <text x="460" y="395" class="text">• id (PK)</text>
+  <text x="460" y="410" class="text">• company_id (FK)</text>
+  <text x="460" y="425" class="text">• quote_number</text>
+  <text x="460" y="440" class="text">• total_amount</text>
+  <text x="460" y="455" class="text">• status</text>
+
+  <rect x="670" y="360" width="200" height="140" class="table finance"/>
+  <text x="770" y="380" text-anchor="middle" class="text title">FINANCE_INVOICES</text>
+  <text x="680" y="395" class="text">• id (PK)</text>
+  <text x="680" y="410" class="text">• company_id (FK)</text>
+  <text x="680" y="425" class="text">• quote_id (FK)</text>
+  <text x="680" y="440" class="text">• invoice_number</text>
+  <text x="680" y="455" class="text">• due_date</text>
+  <text x="680" y="470" class="text">• status</text>
+
+  <!-- Tables KPIs -->
+  <rect x="890" y="50" width="200" height="140" class="table kpi"/>
+  <text x="990" y="70" text-anchor="middle" class="text title">KPI_DEFINITIONS</text>
+  <text x="900" y="85" class="text">• id (PK)</text>
+  <text x="900" y="100" class="text">• name</text>
+  <text x="900" y="115" class="text">• description</text>
+  <text x="900" y="130" class="text">• formula</text>
+  <text x="900" y="145" class="text">• frequency</text>
+  <text x="900" y="160" class="text">• department_id (FK)</text>
+
+  <rect x="890" y="210" width="200" height="160" class="table kpi"/>
+  <text x="990" y="230" text-anchor="middle" class="text title">KPI_RESULTS</text>
+  <text x="900" y="245" class="text">• id (PK)</text>
+  <text x="900" y="260" class="text">• kpi_definition_id (FK)</text>
+  <text x="900" y="275" class="text">• value</text>
+  <text x="900" y="290" class="text">• target_value</text>
+  <text x="900" y="305" class="text">• achievement_rate</text>
+  <text x="900" y="320" class="text">• period_start/end</text>
+
+  <!-- Liens entre tables -->
+  <!-- Company to Contacts -->
+  <line x1="210" y1="130" x2="210" y2="205" class="link"/>
+  
+  <!-- Company to Leads -->
+  <line x1="210" y1="100" x2="450" y2="240" class="link"/>
+  
+  <!-- Company to Pipeline -->
+  <line x1="210" y1="100" x2="670" y2="100" class="link"/>
+  
+  <!-- Company to Quotes/Invoices -->
+  <line x1="210" y1="100" x2="450" y2="410" class="link"/>
+  
+  <!-- Quotes to Invoices -->
+  <line x1="650" y1="420" x2="670" y2="425" class="link"/>
+  
+  <!-- Lead Stages to Pipeline -->
+  <line x1="650" y1="110" x2="670" y2="115" class="link"/>
+  
+  <!-- KPI Definitions to Results -->
+  <line x1="990" y1="190" x2="990" y2="210" class="link"/>
+  
+  <!-- Users to various tables -->
+  <path d="M330 130 L450 270" class="link"/>
+  <path d="M330 130 L670 130" class="link"/>
+  <path d="M330 130 L990 160" class="link"/>
+
+  <!-- Légende -->
+  <rect x="10" y="700" width="30" height="20" class="table central"/>
+  <text x="50" y="715" class="text">Centrales</text>
+  
+  <rect x="150" y="700" width="30" height="20" class="table sales"/>
+  <text x="190" y="715" class="text">Vente</text>
+  
+  <rect x="270" y="700" width="30" height="20" class="table finance"/>
+  <text x="310" y="715" class="text">Finance</text>
+  
+  <rect x="390" y="700" width="30" height="20" class="table kpi"/>
+  <text x="430" y="715" class="text">KPIs</text>
+  
+  <line x1="550" y1="710" x2="580" y2="710" class="link"/>
+  <text x="590" y="715" class="text">Relation (FK)</text>
+</svg>
