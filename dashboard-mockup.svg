@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <!-- Styles -->
+  <defs>
+    <style>
+      .bg { fill: #f5f5f5; }
+      .card { fill: #ffffff; stroke: #e5e5e5; stroke-width: 1; }
+      .header { fill: #2563eb; }
+      .text { font-family: Arial, sans-serif; fill: #333333; }
+      .text-white { fill: #ffffff; }
+      .text-title { font-size: 18px; font-weight: bold; }
+      .text-small { font-size: 12px; }
+      .text-large { font-size: 24px; font-weight: bold; }
+      .metric-good { fill: #22c55e; }
+      .metric-bad { fill: #ef4444; }
+      .metric-neutral { fill: #64748b; }
+      .bar { fill: #93c5fd; }
+      .line { stroke: #3b82f6; stroke-width: 2; fill: none; }
+      .grid { stroke: #e5e5e5; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1600" height="900" class="bg"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1600" height="60" class="header"/>
+  <text x="40" y="38" class="text text-white text-title">DASHBOARD - GESTION ENTREPRISE</text>
+  <text x="1450" y="38" class="text text-white text-small">Mai 2025</text>
+
+  <!-- KPIs principaux -->
+  <rect x="40" y="80" width="360" height="120" class="card"/>
+  <text x="60" y="110" class="text text-title">Revenue du mois</text>
+  <text x="60" y="150" class="text text-large metric-good">€45,780</text>
+  <text x="60" y="175" class="text text-small metric-good">+12% vs mois précédent</text>
+
+  <rect x="420" y="80" width="360" height="120" class="card"/>
+  <text x="440" y="110" class="text text-title">Pipeline actif</text>
+  <text x="440" y="150" class="text text-large metric-neutral">€127,300</text>
+  <text x="440" y="175" class="text text-small">23 opportunités en cours</text>
+
+  <rect x="800" y="80" width="360" height="120" class="card"/>
+  <text x="820" y="110" class="text text-title">Taux de conversion</text>
+  <text x="820" y="150" class="text text-large metric-good">24.5%</text>
+  <text x="820" y="175" class="text text-small">Objectif: 25%</text>
+
+  <rect x="1180" y="80" width="360" height="120" class="card"/>
+  <text x="1200" y="110" class="text text-title">Nouvelles leads</text>
+  <text x="1200" y="150" class="text text-large metric-neutral">18</text>
+  <text x="1200" y="175" class="text text-small">Cette semaine</text>
+
+  <!-- Pipeline par étapes -->
+  <rect x="40" y="220" width="570" height="280" class="card"/>
+  <text x="60" y="250" class="text text-title">Pipeline par étapes</text>
+  
+  <!-- Barres horizontales -->
+  <rect x="80" y="280" width="200" height="30" class="bar"/>
+  <text x="90" y="298" class="text text-small text-white">Qualification (€45,000)</text>
+  <text x="290" y="298" class="text text-small">12 prospects</text>
+  
+  <rect x="80" y="320" width="280" height="30" class="bar"/>
+  <text x="90" y="338" class="text text-small text-white">Proposition (€62,000)</text>
+  <text x="370" y="338" class="text text-small">8 prospects</text>
+  
+  <rect x="80" y="360" width="160" height="30" class="bar"/>
+  <text x="90" y="378" class="text text-small text-white">Négociation (€30,000)</text>
+  <text x="250" y="378" class="text text-small">5 prospects</text>
+  
+  <rect x="80" y="400" width="100" height="30" class="bar"/>
+  <text x="90" y="418" class="text text-small text-white">Signature (€20,000)</text>
+  <text x="190" y="418" class="text text-small">3 prospects</text>
+
+  <!-- Activités commerciales -->
+  <rect x="630" y="220" width="460" height="280" class="card"/>
+  <text x="650" y="250" class="text text-title">Activités commerciales</text>
+  
+  <!-- Tableau d'activités -->
+  <rect x="650" y="270" width="420" height="30" fill="#f8fafc"/>
+  <text x="660" y="288" class="text text-small">Type</text>
+  <text x="750" y="288" class="text text-small">Client</text>
+  <text x="920" y="288" class="text text-small">Date</text>
+  <text x="1000" y="288" class="text text-small">Status</text>
+  
+  <text x="660" y="318" class="text text-small">Meeting</text>
+  <text x="750" y="318" class="text text-small">Entreprise A</text>
+  <text x="920" y="318" class="text text-small">11/05</text>
+  <text x="1000" y="318" class="text text-small metric-good">Complété</text>
+  
+  <text x="660" y="348" class="text text-small">Call</text>
+  <text x="750" y="348" class="text text-small">Entreprise B</text>
+  <text x="920" y="348" class="text text-small">12/05</text>
+  <text x="1000" y="348" class="text text-small metric-neutral">Planifié</text>
+  
+  <text x="660" y="378" class="text text-small">Email</text>
+  <text x="750" y="378" class="text text-small">Entreprise C</text>
+  <text x="920" y="378" class="text text-small">08/05</text>
+  <text x="1000" y="378" class="text text-small metric-bad">En retard</text>
+
+  <!-- Finances -->
+  <rect x="1110" y="220" width="450" height="280" class="card"/>
+  <text x="1130" y="250" class="text text-title">Suivi financier</text>
+  
+  <!-- Donut chart simplifié -->
+  <circle cx="1300" cy="380" r="60" fill="#a3a3a3"/>
+  <circle cx="1300" cy="380" r="60" fill="#22c55e" stroke-dasharray="120 377" transform="rotate(-90 1300 380)"/>
+  <circle cx="1300" cy="380" r="60" fill="#fbbf24" stroke-dasharray="90 377" transform="rotate(30 1300 380)"/>
+  <circle cx="1300" cy="380" r="60" fill="#ef4444" stroke-dasharray="60 377" transform="rotate(120 1300 380)"/>
+  <circle cx="1300" cy="380" r="30" fill="#ffffff"/>
+  
+  <text x="1390" y="330" class="text text-small">Payé: 65%</text>
+  <rect x="1380" y="320" width="15" height="15" fill="#22c55e"/>
+  
+  <text x="1390" y="360" class="text text-small">Envoyé: 25%</text>
+  <rect x="1380" y="350" width="15" height="15" fill="#fbbf24"/>
+  
+  <text x="1390" y="390" class="text text-small">Retard: 10%</text>
+  <rect x="1380" y="380" width="15" height="15" fill="#ef4444"/>
+
+  <!-- Tendance revenus -->
+  <rect x="40" y="520" width="750" height="340" class="card"/>
+  <text x="60" y="550" class="text text-title">Évolution des revenus</text>
+  
+  <!-- Axes -->
+  <line x1="80" y1="800" x2="760" y2="800" class="grid"/>
+  <line x1="80" y1="600" x2="80" y2="800" class="grid"/>
+  
+  <!-- Grille -->
+  <line x1="80" y1="700" x2="760" y2="700" class="grid"/>
+  <line x1="80" y1="650" x2="760" y2="650" class="grid"/>
+  
+  <!-- Labels -->
+  <text x="70" y="805" class="text text-small">0</text>
+  <text x="65" y="705" class="text text-small">25k</text>
+  <text x="65" y="655" class="text text-small">50k</text>
+  <text x="65" y="605" class="text text-small">75k</text>
+  
+  <text x="120" y="820" class="text text-small">Jan</text>
+  <text x="240" y="820" class="text text-small">Feb</text>
+  <text x="360" y="820" class="text text-small">Mar</text>
+  <text x="480" y="820" class="text text-small">Apr</text>
+  <text x="600" y="820" class="text text-small">Mai</text>
+  
+  <!-- Ligne de tendance -->
+  <path d="M120 780 L240 750 L360 720 L480 730 L600 680" class="line"/>
+
+  <!-- Top clients -->
+  <rect x="810" y="520" width="360" height="340" class="card"/>
+  <text x="830" y="550" class="text text-title">Top Clients</text>
+  
+  <text x="850" y="590" class="text text-small">1. Entreprise A</text>
+  <text x="1100" y="590" class="text text-small metric-good">€15,000</text>
+  
+  <text x="850" y="620" class="text text-small">2. Entreprise B</text>
+  <text x="1100" y="620" class="text text-small metric-good">€12,500</text>
+  
+  <text x="850" y="650" class="text text-small">3. Entreprise C</text>
+  <text x="1100" y="650" class="text text-small metric-good">€9,750</text>
+  
+  <text x="850" y="680" class="text text-small">4. Entreprise D</text>
+  <text x="1100" y="680" class="text text-small metric-good">€8,900</text>
+  
+  <text x="850" y="710" class="text text-small">5. Entreprise E</text>
+  <text x="1100" y="710" class="text text-small metric-good">€7,800</text>
+
+  <!-- Performance équipe -->
+  <rect x="1190" y="520" width="370" height="340" class="card"/>
+  <text x="1210" y="550" class="text text-title">Performance équipe</text>
+  
+  <!-- Tableau des commerciaux -->
+  <rect x="1210" y="570" width="330" height="30" fill="#f8fafc"/>
+  <text x="1220" y="588" class="text text-small">Commercial</text>
+  <text x="1360" y="588" class="text text-small">Leads</text>
+  <text x="1430" y="588" class="text text-small">Conv.</text>
+  <text x="1490" y="588" class="text text-small">CA</text>
+  
+  <text x="1220" y="618" class="text text-small">Jean D.</text>
+  <text x="1360" y="618" class="text text-small">12</text>
+  <text x="1430" y="618" class="text text-small metric-good">28%</text>
+  <text x="1490" y="618" class="text text-small">€18k</text>
+  
+  <text x="1220" y="648" class="text text-small">Marie L.</text>
+  <text x="1360" y="648" class="text text-small">8</text>
+  <text x="1430" y="648" class="text text-small metric-good">31%</text>
+  <text x="1490" y="648" class="text text-small">€15k</text>
+  
+  <text x="1220" y="678" class="text text-small">Paul M.</text>
+  <text x="1360" y="678" class="text text-small">15</text>
+  <text x="1430" y="678" class="text text-small metric-neutral">22%</text>
+  <text x="1490" y="678" class="text text-small">€12k</text>
+</svg>
