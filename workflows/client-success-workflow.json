@@ -1,0 +1,404 @@
+{
+  "name": "Client Success Automation",
+  "nodes": [
+    {
+      "name": "New Client Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "parameters": {
+        "table": "companies",
+        "event": "recordUpdated",
+        "conditions": {
+          "options": {
+            "status": {
+              "old": "Prospect",
+              "new": "Client"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Get Client Details",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "get",
+        "table": "companies",
+        "recordId": "{{ $json.fields.id }}"
+      }
+    },
+    {
+      "name": "Create Onboarding Plan",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const client = items[0].json;
+          const today = new Date();
+          
+          // Define onboarding milestones
+          const onboardingPlan = {
+            client_id: client.uuid,
+            client_name: client.name,
+            start_date: today.toISOString().split('T')[0],
+            milestones: [
+              {
+                day: 1,
+                title: "Welcome & Account Setup",
+                type: "Email",
+                template: "welcome_email",
+                responsible: "customer_success"
+              },
+              {
+                day: 2,
+                title: "Kickoff Call",
+                type: "Meeting",
+                duration: "30min",
+                attendees: ["customer_success", "client_contact"],
+                agenda: "Account overview, expectations, roadmap"
+              },
+              {
+                day: 7,
+                title: "First Week Check-in",
+                type: "Call",
+                duration: "15min",
+                purpose: "Address questions, ensure smooth start"
+              },
+              {
+                day: 14,
+                title: "Usage Review",
+                type: "Email",
+                template: "usage_report",
+                includes: "Analytics dashboard, tips"
+              },
+              {
+                day: 30,
+                title: "Monthly Review",
+                type: "Meeting",
+                duration: "45min",
+                purpose: "Success metrics, expansion opportunities"
+              }
+            ],
+            success_metrics: {
+              adoption_rate: { target: 80, unit: "%" },
+              user_engagement: { target: 70, unit: "%" },
+              support_tickets: { target: 2, unit: "count", direction: "less" },
+              satisfaction_score: { target: 4.5, unit: "rating" }
+            }
+          };
+          
+          // Create individual activities
+          const activities = onboardingPlan.milestones.map(milestone => {
+            const activityDate = new Date(today);
+            activityDate.setDate(activityDate.getDate() + milestone.day);
+            
+            return {
+              company_id: client.uuid,
+              type: milestone.type,
+              title: milestone.title,
+              description: milestone.purpose || milestone.agenda || "",
+              scheduled_at: activityDate.toISOString().split('T')[0],
+              template: milestone.template || null,
+              responsible: milestone.responsible || "customer_success"
+            };
+          });
+          
+          return [{ 
+            json: {
+              ...onboardingPlan,
+              activities: activities
+            }
+          }];
+        `
+      }
+    },
+    {
+      "name": "Create Onboarding Activities",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "lead_activities",
+        "fields": {
+          "uuid": "{{ $now() }}-{{ $json.activities.title.replace(' ', '_') }}",
+          "company_id": "{{ $json.client_id }}",
+          "type": "{{ $json.activities[0].type }}",
+          "title": "{{ $json.activities[0].title }}",
+          "description": "{{ $json.activities[0].description }}",
+          "scheduled_at": "{{ $json.activities[0].scheduled_at }}",
+          "created_at": "{{ $now() }}"
+        }
+      }
+    },
+    {
+      "name": "Send Welcome Package",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const client = items[0].json;
+          const onboardingPlan = items[1].json;
+          
+          // Prepare welcome package content
+          const welcomePackage = {
+            to: client.email || "client@company.com",
+            subject: \`Welcome to [Your Company] - Let's get started!\`,
+            attachments: [
+              "onboarding_guide.pdf",
+              "quick_start_video.mp4",
+              "contact_list.pdf"
+            ],
+            message: {
+              client_name: client.name,
+              kickoff_date: onboardingPlan.milestones.find(m => m.title.includes('Kickoff')).day,
+              dedicated_manager: "Customer Success Team",
+              onboarding_timeline: onboardingPlan.milestones
+            }
+          };
+          
+          return [{ json: welcomePackage }];
+        `
+      }
+    },
+    {
+      "name": "Schedule Success Reviews",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const client = items[0].json;
+          const today = new Date();
+          
+          // Schedule recurring success reviews
+          const reviews = [
+            { interval: 7, type: "Weekly Check-in", duration: "15min" },
+            { interval: 30, type: "Monthly Review", duration: "45min" },
+            { interval: 90, type: "Quarterly Business Review", duration: "90min" }
+          ];
+          
+          const scheduledReviews = reviews.map(review => {
+            const reviewDate = new Date(today);
+            reviewDate.setDate(reviewDate.getDate() + review.interval);
+            
+            return {
+              company_id: client.uuid,
+              type: "Meeting",
+              title: review.type,
+              description: \`Regular success review for \${client.name}\`,
+              scheduled_at: reviewDate.toISOString().split('T')[0],
+              duration: review.duration,
+              recurring: {
+                frequency: review.interval === 7 ? 'weekly' : review.interval === 30 ? 'monthly' : 'quarterly',
+                end_condition: 'never'
+              }
+            };
+          });
+          
+          return scheduledReviews.map(review => ({ json: review }));
+        `
+      }
+    },
+    {
+      "name": "Create KPI Tracking",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "kpi_definitions",
+        "fields": {
+          "uuid": "{{ $json.client_id }}_client_success",
+          "name": "Client Success - {{ $json.client_name }}",
+          "description": "Track onboarding and ongoing success metrics",
+          "calculation_formula": "Client adoption and satisfaction tracking",
+          "unit": "%",
+          "target_value": "80",
+          "frequency": "weekly",
+          "department_id": "customer_success",
+          "is_active": "Actif",
+          "created_by": "system"
+        }
+      }
+    },
+    {
+      "name": "Set Up Automation Triggers",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": `
+          const client = items[0].json;
+          
+          // Define automated triggers for client success
+          const automations = {
+            usage_alerts: {
+              condition: "usage_below_threshold",
+              threshold: 30,
+              action: "notify_customer_success",
+              message: "Client usage below expected level"
+            },
+            satisfaction_alerts: {
+              condition: "satisfaction_score_below",
+              threshold: 3.5,
+              action: "escalate_to_manager",
+              message: "Client satisfaction needs attention"
+            },
+            expansion_opportunities: {
+              condition: "usage_above_plan",
+              threshold: 90,
+              action: "flag_for_upsell",
+              message: "Client ready for plan upgrade"
+            },
+            milestone_tracking: {
+              condition: "milestone_overdue",
+              threshold: 2,
+              action: "send_reminder",
+              message: "Onboarding milestone overdue"
+            }
+          };
+          
+          // Create automation configuration
+          const automationConfig = {
+            client_id: client.uuid,
+            automations: Object.entries(automations).map(([key, config]) => ({
+              name: key,
+              ...config,
+              enabled: true,
+              created_at: new Date().toISOString()
+            }))
+          };
+          
+          return [{ json: automationConfig }];
+        `
+      }
+    },
+    {
+      "name": "Notify Customer Success Team",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "customersuccess@company.com",
+        "subject": "New Client Onboarding - {{ $json.client_name }}",
+        "emailFormat": "html",
+        "message": `
+          <h2>New Client Onboarded</h2>
+          
+          <h3>Client Details</h3>
+          <ul>
+            <li>Company: {{ $json.client_name }}</li>
+            <li>Client ID: {{ $json.client_id }}</li>
+            <li>Start Date: {{ $json.start_date }}</li>
+          </ul>
+          
+          <h3>Onboarding Plan</h3>
+          <table border="1" style="border-collapse: collapse; width: 100%;">
+            <tr style="background-color: #f2f2f2;">
+              <th>Day</th>
+              <th>Milestone</th>
+              <th>Type</th>
+              <th>Responsible</th>
+            </tr>
+            {{#each milestones}}
+            <tr>
+              <td>Day {{ this.day }}</td>
+              <td>{{ this.title }}</td>
+              <td>{{ this.type }}</td>
+              <td>{{ this.responsible }}</td>
+            </tr>
+            {{/each}}
+          </table>
+          
+          <h3>Success Metrics to Track</h3>
+          <ul>
+            {{#each success_metrics}}
+            <li>{{ @key }}: Target {{ this.target }}{{ this.unit }}</li>
+            {{/each}}
+          </ul>
+          
+          <p><strong>All activities have been created and scheduled in the CRM.</strong></p>
+        `
+      }
+    },
+    {
+      "name": "Log Onboarding Start",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "audit_logs",
+        "fields": {
+          "table_name": "companies",
+          "entity_id": "{{ $json.client_id }}",
+          "action": "Onboarding Started",
+          "new_values": "{{ JSON.stringify($json) }}",
+          "user_id": "system",
+          "created_at": "{{ $now() }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New Client Trigger": {
+      "main": [[
+        {
+          "node": "Get Client Details",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get Client Details": {
+      "main": [[
+        {
+          "node": "Create Onboarding Plan",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create Onboarding Plan": {
+      "main": [[
+        {
+          "node": "Create Onboarding Activities",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Send Welcome Package",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Schedule Success Reviews",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Schedule Success Reviews": {
+      "main": [[
+        {
+          "node": "Create KPI Tracking",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create KPI Tracking": {
+      "main": [[
+        {
+          "node": "Set Up Automation Triggers",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Set Up Automation Triggers": {
+      "main": [[
+        {
+          "node": "Notify Customer Success Team",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Notify Customer Success Team": {
+      "main": [[
+        {
+          "node": "Log Onboarding Start",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    }
+  }
+}
