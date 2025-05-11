@@ -1,0 +1,275 @@
+{
+  "name": "Lead Scoring & CA Analysis (TPE/PME Focus)",
+  "nodes": [
+    {
+      "name": "Airtable Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "parameters": {
+        "table": "companies",
+        "event": "recordCreated"
+      },
+      "position": [100, 300]
+    },
+    {
+      "name": "Extract Company Data",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "// Extraire et structurer les données du lead\nlet data = {};\n\nif (items && items.length > 0 && items[0].json && items[0].json.fields) {\n  data = items[0].json.fields;\n} else {\n  return [{json: {error: 'No data received from trigger'}}];\n}\n\n// Préparer les données pour le scraping\nconst result = {\n  ...data,\n  recordId: items[0].json.id,\n  // Nettoyer les données pour la recherche\n  searchName: data.name ? data.name.replace(/[^a-zA-Z0-9 ]/g, '') : '',\n  searchDomain: data.domain || '',\n  searchCountry: data.country || 'France'\n};\n\nreturn [{ json: result }];"
+      },
+      "position": [300, 300]
+    },
+    {
+      "name": "Scrape Company Financial Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.pappers.fr/v2/entreprise",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api_token",
+              "value": "YOUR_PAPPERS_API_TOKEN"
+            },
+            {
+              "name": "entreprise",
+              "value": "={{ $json.searchName }}"
+            },
+            {
+              "name": "date_de_mise_a_jour",
+              "value": "2023-01-01"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "position": [500, 300]
+    },
+    {
+      "name": "Fallback to Manual Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.societe.com/cgi-bin/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "champs",
+              "value": "{{ $node[\"Extract Company Data\"].json.searchName }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "position": [500, 450]
+    },
+    {
+      "name": "Analyze Financial Data",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const companyData = items[0].json;\nconst financialData = items[1].json;\nlet scraperData = null;\n\n// Tenter de parser les données financières\nif (financialData && financialData.body) {\n  try {\n    scraperData = JSON.parse(financialData.body);\n  } catch (e) {\n    console.log('Error parsing financial data:', e);\n  }\n}\n\n// Analyser les données financières si disponibles\nlet financialScore = 0;\nlet caEvolution = 'unknown';\nlet recentCA = null;\nlet urgency = 'medium';\n\nif (scraperData && scraperData.entreprise) {\n  // Extraire le CA récent\n  const finances = scraperData.entreprise.finances || [];\n  const lastFinance = finances[0] || {};\n  \n  recentCA = lastFinance.chiffre_affaires;\n  \n  // Analyser l'évolution sur 2-3 ans\n  if (finances.length >= 2) {\n    const currentCA = finances[0].chiffre_affaires || 0;\n    const previousCA = finances[1].chiffre_affaires || 0;\n    \n    if (currentCA > previousCA * 1.2) {\n      caEvolution = 'strong_growth';\n      financialScore += 20;\n      urgency = 'high';\n    } else if (currentCA > previousCA * 1.1) {\n      caEvolution = 'moderate_growth';\n      financialScore += 10;\n      urgency = 'medium';\n    } else if (currentCA < previousCA * 0.9) {\n      caEvolution = 'decline';\n      financialScore += 15; // Les entreprises en difficulté ont besoin d'aide\n      urgency = 'high';\n    } else {\n      caEvolution = 'stable';\n      financialScore += 5;\n    }\n  }\n  \n  // Évaluer la taille (favoriser TPE/PME)\n  if (recentCA) {\n    if (recentCA < 2000000) { // < 2M€\n      financialScore += 20; // TPE\n    } else if (recentCA < 10000000) { // < 10M€\n      financialScore += 15; // PME\n    } else if (recentCA < 50000000) { // < 50M€\n      financialScore += 5; // ETI\n    }\n  }\n}\n\n// Combiner avec les données existantes\nconst result = {\n  ...companyData,\n  financialData: {\n    recentCA: recentCA,\n    caEvolution: caEvolution,\n    financialScore: financialScore,\n    urgency: urgency\n  },\n  combinedUrgency: urgency,\n  financialDataAvailable: !!scraperData\n};\n\nreturn [{ json: result }];"
+      },
+      "position": [700, 300]
+    },
+    {
+      "name": "Calculate Enhanced Lead Score",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const data = items[0].json;\nlet score = 0;\n\n// 1. Company size scoring (inversé pour favoriser TPE/PME)\nif (data.size_category) {\n  switch(data.size_category) {\n    case 'TPE (1-10)': score += 30; break;   // Prioritaire\n    case 'PME (11-50)': score += 25; break;  // Deuxième priorité\n    case 'ETI (51-250)': score += 15; break; // Moins prioritaire\n    case 'GE (250+)': score += 5; break;     // Moins intéressant\n  }\n}\n\n// 2. Industry scoring\nconst targetIndustries = ['Digital', 'E-commerce', 'Services', 'Retail', 'B2B Services'];\nif (data.industry && targetIndustries.includes(data.industry)) {\n  score += 20;\n}\n\n// 3. Geographic scoring\nif (data.country === 'France') {\n  score += 10;\n}\n\n// 4. Financial data scoring\nif (data.financialData) {\n  score += data.financialData.financialScore || 0;\n  \n  // Bonus pour croissance ou déclin (urgence)\n  if (data.financialData.caEvolution === 'strong_growth' || \n      data.financialData.caEvolution === 'decline') {\n    score += 10;\n  }\n}\n\n// 5. Déterminer la priorité finale\nlet finalPriority = 'low';\nlet urgencyLevel = data.financialData?.urgency || 'medium';\n\nif (score > 70) {\n  finalPriority = 'high';\n} else if (score > 45) {\n  finalPriority = 'medium';\n}\n\n// Ajuster selon l'urgence financière\nif (urgencyLevel === 'high' && finalPriority !== 'low') {\n  finalPriority = 'high';\n}\n\n// Métadonnées de scoring\nconst scoreBreakdown = {\n  companySize: data.size_category ? 30 : 0,\n  industry: (data.industry && targetIndustries.includes(data.industry)) ? 20 : 0,\n  geography: data.country === 'France' ? 10 : 0,\n  financial: data.financialData?.financialScore || 0,\n  urgencyBonus: (data.financialData?.caEvolution === 'strong_growth' || \n                data.financialData?.caEvolution === 'decline') ? 10 : 0\n};\n\nconst result = {\n  ...data,\n  leadScore: score,\n  priority: finalPriority,\n  urgency: urgencyLevel,\n  scoreBreakdown: scoreBreakdown,\n  financialInsights: {\n    ca: data.financialData?.recentCA || 'unknown',\n    evolution: data.financialData?.caEvolution || 'unknown',\n    recommendedApproach: urgencyLevel === 'high' ? 'Immediate contact' : \n                        urgencyLevel === 'medium' ? 'Schedule within 48h' : \n                        'Add to nurturing campaign'\n  }\n};\n\nreturn [{ json: result }];"
+      },
+      "position": [900, 300]
+    },
+    {
+      "name": "Get Available Sales Reps",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "users",
+        "filterByFormula": "AND({is_active} = 'Actif', {department_id} = 'sales')"
+      },
+      "position": [1100, 300]
+    },
+    {
+      "name": "Smart Assignment",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const lead = items[0].json;\nconst salesRepsList = items[1].json;\n\nif (!salesRepsList || salesRepsList.length === 0) {\n  return [{json: {error: 'No sales reps available'}}];\n}\n\n// Assignation basée sur l'urgence et la spécialisation\nlet assignedRep;\n\n// Exemple : assigner les leads urgents aux commerciaux seniors\nif (lead.urgency === 'high') {\n  // Chercher un commercial senior ou expérimenté\n  assignedRep = salesRepsList.find(rep => rep.fields?.experience_level === 'senior') || salesRepsList[0];\n} else {\n  // Round-robin pour les leads normaux\n  assignedRep = salesRepsList[0];\n}\n\n// Définir les actions selon le profil et l'urgence\nlet nextActions = [];\n\nif (lead.urgency === 'high') {\n  nextActions = [\n    { type: 'Call', priority: 'urgent', deadline: '2h', template: 'urgent_outreach' },\n    { type: 'Email', template: 'urgent_opportunity' }\n  ];\n} else if (lead.priority === 'high') {\n  nextActions = [\n    { type: 'Email', template: 'tpe_pme_intro', timing: 'immediate' },\n    { type: 'Call', priority: 'high', deadline: '24h' }\n  ];\n} else if (lead.priority === 'medium') {\n  nextActions = [\n    { type: 'Email', template: 'standard_intro' },\n    { type: 'Call', priority: 'medium', deadline: '48h' }\n  ];\n} else {\n  nextActions = [\n    { type: 'Email', template: 'nurturing_sequence' }\n  ];\n}\n\n// Personnaliser le message selon les insights financiers\nlet personalizedMessage = '';\nif (lead.financialData?.caEvolution === 'strong_growth') {\n  personalizedMessage = 'Company showing strong growth - expansion opportunity';\n} else if (lead.financialData?.caEvolution === 'decline') {\n  personalizedMessage = 'Company facing challenges - solution urgently needed';\n} else {\n  personalizedMessage = 'Stable company - focus on value proposition';\n}\n\nreturn [{\n  json: {\n    leadId: lead.uuid || lead.recordId,\n    leadRecordId: lead.recordId,\n    assignedTo: assignedRep.uuid || assignedRep.fields?.uuid,\n    assignedEmail: assignedRep.email || assignedRep.fields?.email,\n    leadScore: lead.leadScore,\n    priority: lead.priority,\n    urgency: lead.urgency,\n    nextActions: nextActions,\n    companyName: lead.name || 'Unknown Company',\n    financialInsights: lead.financialInsights,\n    personalizedMessage: personalizedMessage,\n    assignmentReason: `${lead.urgency.toUpperCase()} urgency - TPE/PME focus`,\n    approachRecommendation: lead.financialInsights?.recommendedApproach\n  }\n}];"
+      },
+      "position": [1300, 300]
+    },
+    {
+      "name": "Update Lead with Financial Data",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "update",
+        "table": "companies",
+        "recordId": "={{ $json.leadRecordId }}",
+        "fields": {
+          "assigned_to": "={{ $json.assignedTo }}",
+          "lead_score": "={{ $json.leadScore }}",
+          "priority": "={{ $json.priority }}",
+          "urgency": "={{ $json.urgency }}",
+          "last_ca": "={{ $json.financialInsights?.ca || 'unknown' }}",
+          "ca_evolution": "={{ $json.financialInsights?.evolution || 'unknown' }}",
+          "financial_score": "={{ $json.leadScore > 0 ? $json.leadScore : 'N/A' }}"
+        }
+      },
+      "position": [1500, 200]
+    },
+    {
+      "name": "Create Prioritized Activity",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "lead_activities",
+        "fields": {
+          "uuid": "{{ $now() }}",
+          "company_id": "={{ $json.leadId }}",\n          "user_id": "={{ $json.assignedTo }}",\n          "type": "{{ $json.nextActions[0].type }}",\n          "title": "{{ $json.urgency.toUpperCase() }} - Follow-up on {{ $json.companyName }}",\n          "scheduled_at": "{{ $now('YYYY-MM-DD') }}",\n          "description": "Score: {{ $json.leadScore }}/100\\nCA Evolution: {{ $json.financialInsights?.evolution }}\\nApproach: {{ $json.personalizedMessage }}",\n          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [1500, 400]
+    },
+    {
+      "name": "Enhanced Sales Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "parameters": {
+        "to": "={{ $json.assignedEmail }}",
+        "subject": "🚨 {{ $json.urgency.toUpperCase() }} Lead: {{ $json.companyName }} (Score: {{ $json.leadScore }})",
+        "emailFormat": "html",
+        "message": "<h2>New TPE/PME Lead Assignment</h2>\n<p><strong>{{ $json.companyName }}</strong> - {{ $json.urgency.toUpperCase() }} Priority</p>\n\n<h3>Lead Score: {{ $json.leadScore }}/100</h3>\n\n<h3>Financial Insights:</h3>\n<ul>\n  <li>Recent CA: {{ $json.financialInsights?.ca || 'Unknown' }}</li>\n  <li>Evolution: {{ $json.financialInsights?.evolution || 'Unknown' }}</li>\n  <li>Urgency Level: {{ $json.urgency.toUpperCase() }}</li>\n</ul>\n\n<h3>Recommended Approach:</h3>\n<p><strong>{{ $json.personalizedMessage }}</strong></p>\n<p>{{ $json.approachRecommendation }}</p>\n\n<h3>Next Actions:</h3>\n<ol>\n  {{#each nextActions}}\n  <li>{{ this.type }} - {{ this.priority }} (Deadline: {{ this.deadline }})</li>\n  {{/each}}\n</ol>\n\n<a href=\"https://airtable.com/[YOUR_BASE_ID]/tblY1PyOUlM7cHI6e/{{ $json.leadRecordId }}\">View in CRM</a>"
+      },
+      "position": [1500, 600]
+    },
+    {
+      "name": "Log Enhanced Audit",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "create",
+        "table": "audit_logs",
+        "fields": {
+          "table_name": "companies",
+          "entity_id": "={{ $json.leadRecordId }}",
+          "action": "Lead Qualified & Assigned",
+          "new_values": "Score: {{ $json.leadScore }}, Urgency: {{ $json.urgency }}, CA: {{ $json.financialInsights?.ca || 'N/A' }}",
+          "user_id": "system",
+          "created_at": "{{ $now('YYYY-MM-DD') }}"
+        }
+      },
+      "position": [1700, 600]
+    }
+  ],
+  "connections": {
+    "Airtable Trigger": {
+      "main": [[
+        {
+          "node": "Extract Company Data",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Extract Company Data": {
+      "main": [[
+        {
+          "node": "Scrape Company Financial Data",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Scrape Company Financial Data": {
+      "main": [[
+        {
+          "node": "Analyze Financial Data",
+          "type": "main",
+          "index": 0
+        }
+      ]],
+      "error": [[
+        {
+          "node": "Fallback to Manual Research",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Fallback to Manual Research": {
+      "main": [[
+        {
+          "node": "Analyze Financial Data",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Analyze Financial Data": {
+      "main": [[
+        {
+          "node": "Calculate Enhanced Lead Score",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Calculate Enhanced Lead Score": {
+      "main": [[
+        {
+          "node": "Get Available Sales Reps",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Get Available Sales Reps": {
+      "main": [[
+        {
+          "node": "Smart Assignment",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Smart Assignment": {
+      "main": [[
+        {
+          "node": "Update Lead with Financial Data",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Create Prioritized Activity",
+          "type": "main",
+          "index": 0
+        },
+        {
+          "node": "Enhanced Sales Notification",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    },
+    "Create Prioritized Activity": {
+      "main": [[
+        {
+          "node": "Log Enhanced Audit",
+          "type": "main",
+          "index": 0
+        }
+      ]]
+    }
+  }
+}
